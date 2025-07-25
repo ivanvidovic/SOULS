@@ -119,9 +119,8 @@
         let mic;
         let fft;
         let particles = []; // For the orbiting spheres with lines
-        let centralClusterSpheres = []; // For the central cluster of spheres
+        let star; // NEW: A single star object at the center
         const numParticles = 200;
-        const numCentralClusterSpheres = 300;
         let centralSphereSize = 150; // Base size for scaling
         let currentVolume = 0;
         let bassEnergy = 0;
@@ -173,8 +172,8 @@
         // p5.Graphics buffer for off-screen rendering
         let mainSceneBuffer;
 
-        const TAPER_START_RADIUS = 80;
-        const TAPER_END_RADIUS = 250;
+        const TAPER_START_RADIUS = 160;
+        const TAPER_END_RADIUS = 300;
 
         function showMessageBox(message) {
             document.getElementById('message-content').innerText = message;
@@ -185,10 +184,50 @@
             document.getElementById('message-box').style.display = 'none';
         }
 
+        class Star {
+            constructor() {
+                this.baseCoreSize = 2;
+                this.coreSize = this.baseCoreSize;
+                this.targetCoreSize = this.baseCoreSize;
+                
+                this.rotation = createVector(random(TWO_PI), random(TWO_PI), random(TWO_PI));
+                this.rotationSpeed = createVector(random(-0.005, 0.005), random(-0.005, 0.005), random(-0.005, 0.005));
+            }
+
+            applyAudioInfluence(volume, bass) {
+                let effectiveVolume = (volume > minActivationVolume) ? volume : 0;
+                let effectiveBass = (bass > minActivationBass) ? bass : 0;
+                let volumeInfluenceAmount = map(effectiveVolume, minActivationVolume, 0.6, 0, 1, true);
+                let bassInfluenceAmount = map(effectiveBass, minActivationBass, 200, 0, 1, true);
+                let totalAudioInfluence = max(volumeInfluenceAmount, bassInfluenceAmount);
+
+                // MODIFICATION: Audio scaling factor increased to 10.
+                this.targetCoreSize = this.baseCoreSize + (this.baseCoreSize * 10 * totalAudioInfluence);
+            }
+
+            update() {
+                this.coreSize = lerp(this.coreSize, this.targetCoreSize, 0.1);
+                this.rotation.add(this.rotationSpeed);
+            }
+
+            display(graphicsBuffer) {
+                graphicsBuffer.push();
+                graphicsBuffer.rotateX(this.rotation.x);
+                graphicsBuffer.rotateY(this.rotation.y);
+                graphicsBuffer.rotateZ(this.rotation.z);
+                
+                graphicsBuffer.noStroke();
+                graphicsBuffer.fill(255, 255, 255, 255); 
+                graphicsBuffer.sphere(this.coreSize);
+                
+                graphicsBuffer.pop();
+            }
+        }
+
         class ParticleSphere {
             constructor() {
-                this.maxOrbitRadius = random(120, 250);
-                this.minOrbitRadius = 80;
+                this.minOrbitRadius = 160;
+                this.maxOrbitRadius = random(170, 300);
 
                 let initialRadius = map(pow(random(1), 2), 0, 1, this.minOrbitRadius, this.maxOrbitRadius);
                 this.pos = p5.Vector.random3D().mult(initialRadius);
@@ -372,49 +411,7 @@
                 graphicsBuffer.pop();
             }
         }
-
-        class CentralClusterSphere {
-            constructor() {
-                let radius = map(pow(random(1), 2), 0, 1, 0, centralSphereSize * 0.8);
-                this.pos = p5.Vector.random3D().mult(radius);
-                this.baseSize = random(1, 3);
-                this.size = this.baseSize;
-                this.noiseOffset = random(1000);
-                this.color = sphereColors[floor(random(sphereColors.length))];
-                this.brightnessFactor = random(0.3, 0.7);
-            }
-            update() {
-                let noiseFactor = 0.005;
-                let nx = map(noise(this.noiseOffset, frameCount * noiseFactor, 0), 0, 1, -0.5, 0.5);
-                let ny = map(noise(this.noiseOffset + 100, frameCount * noiseFactor, 0), 0, 1, -0.5, 0.5);
-                let nz = map(noise(this.noiseOffset + 200, frameCount * noiseFactor, 0), 0, 1, -0.5, 0.5);
-                this.pos.add(createVector(nx, ny, nz).mult(0.1));
-                if (this.pos.mag() > centralSphereSize * 0.8) {
-                    this.pos.setMag(centralSphereSize * 0.8);
-                }
-            }
-            applyAudioInfluence(volume, bass) {
-                let effectiveVolume = (volume > minActivationVolume) ? volume : 0;
-                let effectiveBass = (bass > minActivationBass) ? bass : 0;
-                let volumeInfluenceAmount = map(effectiveVolume, minActivationVolume, 0.6, 0, 1, true);
-                let bassInfluenceAmount = map(effectiveBass, minActivationBass, 200, 0, 1, true);
-                let totalAudioInfluence = max(volumeInfluenceAmount, bassInfluenceAmount);
-                this.size = this.baseSize + (this.baseSize * 2 * totalAudioInfluence);
-                this.brightnessFactor = lerp(this.brightnessFactor, 0.3 + (0.7 * totalAudioInfluence), 0.1);
-            }
-            display(graphicsBuffer) {
-                graphicsBuffer.push();
-                graphicsBuffer.translate(this.pos.x, this.pos.y, this.pos.z);
-                graphicsBuffer.noStroke();
-                graphicsBuffer.fill(this.color[0] * this.brightnessFactor,
-                                     this.color[1] * this.brightnessFactor,
-                                     this.color[2] * this.brightnessFactor,
-                                     this.brightnessFactor * 255);
-                graphicsBuffer.sphere(this.size);
-                graphicsBuffer.pop();
-            }
-        }
-
+        
         function setup() {
             createCanvas(windowWidth, windowHeight, WEBGL);
             pixelDensity(1);
@@ -431,9 +428,9 @@
             for (let i = 0; i < numParticles; i++) {
                 particles.push(new ParticleSphere());
             }
-            for (let i = 0; i < numCentralClusterSpheres; i++) {
-                centralClusterSpheres.push(new CentralClusterSphere());
-            }
+            
+            // Create the central star
+            star = new Star();
 
             startButton = document.getElementById('startButton');
             startButton.addEventListener('click', startAudio);
@@ -442,13 +439,9 @@
             targetSceneRotationY = sceneRotationY;
         }
 
-        // The mouseWheel function now updates the target zoom level.
         function mouseWheel(event) {
-            // MODIFICATION: Increased sensitivity by 50% (0.5 * 1.5 = 0.75)
             targetCameraZ += event.delta * 0.75;
-            // Constrain the target zoom to the defined min and max
             targetCameraZ = constrain(targetCameraZ, minZoom, maxZoom);
-            // Prevent the page from scrolling
             return false;
         }
 
@@ -528,7 +521,6 @@
             resizeCanvas(windowWidth, windowHeight);
             mainSceneBuffer = createGraphics(width, height, WEBGL);
             mainSceneBuffer.pixelDensity(1);
-            // Recalculate maxZoom on resize to maintain perspective
             maxZoom = (height / 2) / tan(PI / 6);
             cameraZ = constrain(cameraZ, minZoom, maxZoom);
             targetCameraZ = constrain(targetCameraZ, minZoom, maxZoom);
@@ -538,7 +530,6 @@
             mainSceneBuffer.background(0, 0);
             mainSceneBuffer.push();
 
-            // Smoothly interpolate the camera's Z position towards the target
             cameraZ = lerp(cameraZ, targetCameraZ, zoomLerpFactor);
             mainSceneBuffer.camera(0, 0, cameraZ, 0, 0, 0, 0, 1, 0);
 
@@ -552,8 +543,7 @@
             sceneNoiseOffsetZ += noiseIncrement;
             mainSceneBuffer.rotateZ(sceneRotationZ);
 
-            // Calculate opacity for the central black sphere based on zoom
-            let blackSphereAlpha = map(cameraZ, minZoom, maxZoom, 64, 255, true);
+            let blackSphereAlpha = map(cameraZ, minZoom, maxZoom, 0, 255, true);
 
             if (audioStarted) {
                 if (mic && mic.enabled && getAudioContext().state === 'running') {
@@ -575,11 +565,10 @@
                 targetCentralSphereSize += map(effectiveVolumeCentral, minActivationVolume, 0.6, 0, 112.5, true);
                 targetCentralSphereSize += map(effectiveBassEnergyCentral, minActivationBass, 200, 0, 45, true);
 
-                for (let sphere of centralClusterSpheres) {
-                    sphere.update();
-                    sphere.applyAudioInfluence(currentVolume, bassEnergy);
-                    sphere.display(mainSceneBuffer);
-                }
+                star.update();
+                star.applyAudioInfluence(currentVolume, bassEnergy);
+                star.display(mainSceneBuffer);
+
                 for (let particle of particles) {
                     particle.update();
                     particle.applyAudioInfluence(audioHistory);
@@ -598,11 +587,11 @@
                 while (audioHistory.length > historyLength) {
                     audioHistory.shift();
                 }
-                for (let sphere of centralClusterSpheres) {
-                    sphere.update();
-                    sphere.applyAudioInfluence(0, 0);
-                    sphere.display(mainSceneBuffer);
-                }
+                
+                star.update();
+                star.applyAudioInfluence(0,0);
+                star.display(mainSceneBuffer);
+
                 for (let particle of particles) {
                     particle.update();
                     particle.applyAudioInfluence(audioHistory);
