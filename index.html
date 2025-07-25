@@ -24,8 +24,6 @@
         }
         canvas {
             display: block;
-            border-radius: 1rem; /* Rounded corners for the canvas */
-            box-shadow: 0 0 20px rgba(0, 255, 255, 0.5); /* Glowing effect */
             max-width: 100vw; /* Ensure canvas fits screen width */
             max-height: 100vh; /* Ensure canvas fits screen height */
         }
@@ -119,7 +117,7 @@
         let mic;
         let fft;
         let particles = []; // For the orbiting spheres with lines
-        let star; // NEW: A single star object at the center
+        let star; 
         const numParticles = 200;
         let centralSphereSize = 150; // Base size for scaling
         let currentVolume = 0;
@@ -183,7 +181,7 @@
         function hideMessageBox() {
             document.getElementById('message-box').style.display = 'none';
         }
-
+        
         class Star {
             constructor() {
                 this.baseCoreSize = 2;
@@ -201,7 +199,6 @@
                 let bassInfluenceAmount = map(effectiveBass, minActivationBass, 200, 0, 1, true);
                 let totalAudioInfluence = max(volumeInfluenceAmount, bassInfluenceAmount);
 
-                // MODIFICATION: Audio scaling factor increased to 10.
                 this.targetCoreSize = this.baseCoreSize + (this.baseCoreSize * 10 * totalAudioInfluence);
             }
 
@@ -345,7 +342,8 @@
                 this.size = lerp(this.size, this.targetSize, lerpFactorSize);
             }
 
-            display(graphicsBuffer) {
+            // MODIFICATION: The display method now accepts a zoom multiplier to scale elements.
+            display(graphicsBuffer, zoomMultiplier) {
                 if (this.flowDirection === 0) return;
 
                 for (let i = 0; i < this.positionHistory.length; i++) {
@@ -384,7 +382,8 @@
                         flowAlpha = constrain(this.currentBrightnessFactor * flowAlpha, 0, 255);
                         
                         let sizeMultiplier = map(this.currentBrightnessFactor, 0.5, 1.0, 0.5, 1.0, true);
-                        let displaySize = flowEl.size * sizeMultiplier;
+                        // Apply the new zoom multiplier here
+                        let displaySize = flowEl.size * sizeMultiplier * zoomMultiplier;
 
                         graphicsBuffer.noStroke();
                         graphicsBuffer.fill(this.originalRGB[0], this.originalRGB[1], this.originalRGB[2], flowAlpha);
@@ -429,7 +428,6 @@
                 particles.push(new ParticleSphere());
             }
             
-            // Create the central star
             star = new Star();
 
             startButton = document.getElementById('startButton');
@@ -544,7 +542,9 @@
             mainSceneBuffer.rotateZ(sceneRotationZ);
 
             let blackSphereAlpha = map(cameraZ, minZoom, maxZoom, 0, 255, true);
-
+            // NEW: Calculate the zoom-based size multiplier for the flowing elements.
+            let zoomSizeMultiplier = map(cameraZ, maxZoom, minZoom, 1.0, 0.5, true);
+            
             if (audioStarted) {
                 if (mic && mic.enabled && getAudioContext().state === 'running') {
                     currentVolume = mic.getLevel();
@@ -572,7 +572,8 @@
                 for (let particle of particles) {
                     particle.update();
                     particle.applyAudioInfluence(audioHistory);
-                    particle.display(mainSceneBuffer);
+                    // Pass the multiplier to the display function
+                    particle.display(mainSceneBuffer, zoomSizeMultiplier);
                 }
 
                 mainSceneBuffer.push();
@@ -595,7 +596,8 @@
                 for (let particle of particles) {
                     particle.update();
                     particle.applyAudioInfluence(audioHistory);
-                    particle.display(mainSceneBuffer);
+                    // Pass the multiplier to the display function
+                    particle.display(mainSceneBuffer, zoomSizeMultiplier);
                 }
                 mainSceneBuffer.push();
                 mainSceneBuffer.noStroke();
