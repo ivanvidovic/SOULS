@@ -252,9 +252,8 @@
                     this.flowDirection = -1;
                 }
                 
-                // NEW: Assign a random max opacity for each line
                 if (random() < 0.33) {
-                    this.maxOpacity = 255; // 33% chance to reach full opacity
+                    this.maxOpacity = 255; 
                 } else {
                     this.maxOpacity = random(150, 220);
                 }
@@ -344,15 +343,13 @@
             }
 
             display(graphicsBuffer, zoomMultiplier, zoomGradientFactor, zoomStrokeMultiplier) {
-                // Draw the connector line
+                // REVERTED: Connector line is now a simple, solid line again.
                 graphicsBuffer.push();
-                // MODIFICATION: Max line thickness reduced from 2.5 to 1.2 for a thinner look
                 graphicsBuffer.strokeWeight(map(this.currentBrightnessFactor, 0.5, 1.0, 0.5, 1.2) * zoomStrokeMultiplier);
 
                 const whiteColor = color(255);
                 const particleColor = color(this.originalRGB[0], this.originalRGB[1], this.originalRGB[2]);
                 const finalColor = lerpColor(particleColor, whiteColor, zoomGradientFactor);
-                // MODIFICATION: Line alpha now maps from a subdued 50 to its unique maxOpacity.
                 const finalAlpha = map(this.currentBrightnessFactor, 0.5, 1.0, 50, this.maxOpacity);
 
                 graphicsBuffer.stroke(red(finalColor), green(finalColor), blue(finalColor), finalAlpha);
