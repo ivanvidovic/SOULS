@@ -129,9 +129,9 @@
         // State variables for the awakening transition
         let awakeningState = 'dormant'; // 'dormant', 'awakening', 'active'
         let transitionProgress = 0;
-        const windUpDuration = 45; // 0.75 seconds
-        const releaseDuration = 22.5; // 0.375 seconds
-        const transitionDuration = windUpDuration + releaseDuration;
+        const sphereTransitionDuration = 45; 
+        // MODIFICATION: Changed black sphere transition duration from 90 to 60
+        const blackSphereTransitionDuration = 60; 
 
         // Global scene rotation variables for X, Y, Z axes
         let sceneRotationX = 0;
@@ -274,50 +274,38 @@
                     return; 
                 } 
                 
-                let organicForceFactor = 0;
                 if (awakeningState === 'awakening') {
-                    const lerpAmount = transitionProgress / transitionDuration;
-                    organicForceFactor = lerpAmount; 
-                    
-                    if (transitionProgress < windUpDuration) {
-                        const phaseProgress = transitionProgress / windUpDuration;
-                        const easeAmount = 1 - pow(1 - phaseProgress, 3); // Ease-out curve
-                        let inwardForce = this.pos.copy().normalize().mult(-0.08 * (1 - easeAmount));
-                        this.applyForce(inwardForce);
-                    } else {
-                        let outwardForce = this.pos.copy().normalize().mult(0.08);
-                        this.applyForce(outwardForce);
-                    }
+                    const lerpAmount = easeInOutCubic(transitionProgress / sphereTransitionDuration);
+                    this.pos = p5.Vector.lerp(this.initialPos, this.targetPos, lerpAmount);
                 } else { // 'active' state
-                    organicForceFactor = 1.0;
+                    let organicForceFactor = 1.0;
+                    let noiseFactor = 0.001;
+                    let nx = map(noise(this.noiseOffset, frameCount * noiseFactor, 0), 0, 1, -this.maxForce, this.maxForce);
+                    let ny = map(noise(this.noiseOffset + 1000, frameCount * noiseFactor, 0), 0, 1, -this.maxForce, this.maxForce);
+                    let nz = map(noise(this.noiseOffset + 2000, frameCount * noiseFactor, 0), 0, 1, -this.maxForce, this.maxForce);
+                    this.applyForce(createVector(nx, ny, nz).mult(organicForceFactor));
+
+                    let currentDistance = this.pos.mag();
+                    if (currentDistance > this.targetPos.mag()) { 
+                        let steer = p5.Vector.sub(createVector(0,0,0), this.pos);
+                        steer.setMag(map(currentDistance, this.targetPos.mag(), this.targetPos.mag() + 50, 0, this.maxForce * 0.7));
+                        this.applyForce(steer.mult(organicForceFactor));
+                    } else if (currentDistance < 150) { 
+                        let steer = p5.Vector.sub(this.pos, createVector(0,0,0));
+                        steer.setMag(map(currentDistance, 150, 100, 0, this.maxForce * 1.5));
+                        this.applyForce(steer);
+                    }
+
+                    let tangentialForce = createVector(-this.pos.y, this.pos.x, this.pos.z * 0.1).normalize();
+                    tangentialForce.mult(this.maxForce * 0.2);
+                    this.applyForce(tangentialForce.mult(organicForceFactor));
+
+                    this.vel.add(this.acc);
+                    this.vel.limit(this.maxSpeed);
+                    this.pos.add(this.vel);
+                    this.acc.mult(0);
+                    this.vel.mult(0.95);
                 }
-
-                let noiseFactor = 0.001;
-                let nx = map(noise(this.noiseOffset, frameCount * noiseFactor, 0), 0, 1, -this.maxForce, this.maxForce);
-                let ny = map(noise(this.noiseOffset + 1000, frameCount * noiseFactor, 0), 0, 1, -this.maxForce, this.maxForce);
-                let nz = map(noise(this.noiseOffset + 2000, frameCount * noiseFactor, 0), 0, 1, -this.maxForce, this.maxForce);
-                this.applyForce(createVector(nx, ny, nz).mult(organicForceFactor));
-
-                let currentDistance = this.pos.mag();
-                if (currentDistance > this.targetPos.mag()) { 
-                    let steer = p5.Vector.sub(createVector(0,0,0), this.pos);
-                    steer.setMag(map(currentDistance, this.targetPos.mag(), this.targetPos.mag() + 50, 0, this.maxForce * 0.7));
-                    this.applyForce(steer.mult(organicForceFactor));
-                } else if (currentDistance < 150) { 
-                    let steer = p5.Vector.sub(this.pos, createVector(0,0,0));
-                    steer.setMag(map(currentDistance, 150, 100, 0, this.maxForce * 1.5));
-                    this.applyForce(steer);
-                }
-
-                let tangentialForce = createVector(-this.pos.y, this.pos.x, this.pos.z * 0.1).normalize();
-                tangentialForce.mult(this.maxForce * 0.2);
-                this.applyForce(tangentialForce.mult(organicForceFactor));
-
-                this.vel.add(this.acc);
-                this.vel.limit(this.maxSpeed);
-                this.pos.add(this.vel);
-                this.acc.mult(0);
-                this.vel.mult(0.95);
 
                 if (awakeningState === 'active' && this.flowDirection !== 0) {
                     if (frameCount % this.flowSpawnRate === 0 && this.flowingElements.length < this.maxFlowElements) {
@@ -383,7 +371,7 @@
                     
                     const idleAlpha = 50;
                     const activeAlpha = map(this.currentBrightnessFactor, 0.5, 1.0, idleAlpha, this.maxOpacity);
-                    const transitionAlpha = easeInOutCubic(transitionProgress / transitionDuration) * idleAlpha;
+                    const transitionAlpha = easeInOutCubic(transitionProgress / sphereTransitionDuration) * idleAlpha;
                     const finalAlpha = (awakeningState === 'awakening') ? transitionAlpha : activeAlpha;
 
 
@@ -593,21 +581,13 @@
             
             if (awakeningState === 'awakening') {
                 transitionProgress++;
-                if (transitionProgress >= transitionDuration) {
+                if (transitionProgress >= sphereTransitionDuration) {
                     awakeningState = 'active';
                     audioStarted = true;
                 }
                 
-                if (transitionProgress < windUpDuration) {
-                    const phaseProgress = transitionProgress / windUpDuration;
-                    currentCentralSphereSize = lerp(80, 60, easeInOutCubic(phaseProgress));
-                } else {
-                    const slowerReleaseDuration = releaseDuration * 1.5;
-                    const phaseProgress = (transitionProgress - windUpDuration) / slowerReleaseDuration;
-                     if (phaseProgress <= 1.0) {
-                        currentCentralSphereSize = lerp(60, centralSphereSize, phaseProgress);
-                    }
-                }
+                const blackSphereProgress = min(1, transitionProgress / blackSphereTransitionDuration);
+                currentCentralSphereSize = lerp(80, centralSphereSize, easeInOutCubic(blackSphereProgress));
             }
 
             if (audioStarted) {
