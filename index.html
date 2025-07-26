@@ -240,7 +240,6 @@
                 this.maxSpeed = random(0.8, 1.5);
                 this.maxForce = random(0.04, 0.08);
                 
-                // REVERT: Flowing elements are back
                 this.flowingElements = [];
                 this.flowSpawnRate = floor(random(30, 90));
                 this.maxFlowElements = floor(random(3, 8));
@@ -286,12 +285,12 @@
                 this.acc.mult(0);
                 this.vel.mult(0.95);
 
-                // REVERT: Update logic for flowing elements is back
                 if (this.flowDirection !== 0) {
                     if (frameCount % this.flowSpawnRate === 0 && this.flowingElements.length < this.maxFlowElements) {
                         this.flowingElements.push({
                             offset: this.flowDirection === 1 ? 0 : 1,
-                            speed: random(0.00125, 0.00375),
+                            // MODIFICATION: Speed reduced by a factor of 3
+                            speed: random(0.000416, 0.00125),
                             size: random(0.625, 1.875) * this.flowElementBaseSize
                         });
                     }
@@ -338,10 +337,11 @@
                 this.size = lerp(this.size, this.targetSize, lerpFactorSize);
             }
 
-            display(graphicsBuffer, zoomMultiplier, zoomGradientFactor) {
+            display(graphicsBuffer, zoomMultiplier, zoomGradientFactor, zoomStrokeMultiplier) {
                 // Draw the connector line
                 graphicsBuffer.push();
-                graphicsBuffer.strokeWeight(map(this.currentBrightnessFactor, 0.5, 1.0, 0.5, 2.5));
+                // Apply zoom-based thinning
+                graphicsBuffer.strokeWeight(map(this.currentBrightnessFactor, 0.5, 1.0, 0.5, 2.5) * zoomStrokeMultiplier);
 
                 const whiteColor = color(255);
                 const particleColor = color(this.originalRGB[0], this.originalRGB[1], this.originalRGB[2]);
@@ -352,7 +352,7 @@
                 graphicsBuffer.line(0, 0, 0, this.pos.x, this.pos.y, this.pos.z);
                 graphicsBuffer.pop();
 
-                // REVERT: Flowing elements are drawn again
+                // Draw flowing elements
                 if (this.flowDirection !== 0) {
                     graphicsBuffer.push();
                     graphicsBuffer.blendMode(ADD);
@@ -526,7 +526,13 @@
 
             let blackSphereAlpha = map(cameraZ, minZoom, maxZoom, 0, 255, true);
             let zoomSizeMultiplier = map(cameraZ, maxZoom, minZoom, 1.0, 0.5, true);
-            let zoomGradientFactor = map(cameraZ, maxZoom, minZoom, 0, 1, true);
+            
+            // MODIFICATION: The gradient now starts fading in at 66% of the zoom distance.
+            const gradientStartZoom = lerp(maxZoom, minZoom, 0.66);
+            let zoomGradientFactor = map(cameraZ, gradientStartZoom, minZoom, 0, 1, true);
+            
+            // MODIFICATION: New multiplier to make lines thinner when zoomed in.
+            let zoomStrokeMultiplier = map(cameraZ, maxZoom, minZoom, 1.0, 0.5, true);
             
             if (audioStarted) {
                 if (mic && mic.enabled && getAudioContext().state === 'running') {
@@ -555,7 +561,7 @@
                 for (let particle of particles) {
                     particle.update();
                     particle.applyAudioInfluence(audioHistory);
-                    particle.display(mainSceneBuffer, zoomSizeMultiplier, zoomGradientFactor);
+                    particle.display(mainSceneBuffer, zoomSizeMultiplier, zoomGradientFactor, zoomStrokeMultiplier);
                 }
 
                 mainSceneBuffer.push();
@@ -578,7 +584,7 @@
                 for (let particle of particles) {
                     particle.update();
                     particle.applyAudioInfluence(audioHistory);
-                    particle.display(mainSceneBuffer, zoomSizeMultiplier, zoomGradientFactor);
+                    particle.display(mainSceneBuffer, zoomSizeMultiplier, zoomGradientFactor, zoomStrokeMultiplier);
                 }
                 mainSceneBuffer.push();
                 mainSceneBuffer.noStroke();
