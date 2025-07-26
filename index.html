@@ -187,6 +187,9 @@
         let cameraZ, targetCameraZ, minZoom, maxZoom;
         const zoomLerpFactor = 0.1;
 
+        // MODIFICATION: Variable to track touch distance for pinch-zoom
+        let prevTouchDist = 0;
+
         let audioHistory = [];
         const historyLength = 8;
         const minActivationVolume = 0.15;
@@ -351,7 +354,6 @@
                 if (audioActive) {
                     finalAlpha = map(this.currentBrightnessFactor, 0.5, 1.0, 50, this.maxOpacity, true);
                 } else {
-                    // MODIFICATION: Increased alpha range by 25% for more noticeable twinkle
                     finalAlpha = map(this.currentBrightnessFactor, 0.38, 0.62, 19, 81, true);
                 }
 
@@ -429,9 +431,48 @@
         function mousePressed() { isDragging = true; prevMouseX = mouseX; prevMouseY = mouseY; }
         function mouseReleased() { isDragging = false; }
         function mouseDragged() { if (isDragging) { let dx = mouseX - prevMouseX; let dy = mouseY - prevMouseY; targetSceneRotationY += dx * 0.005; targetSceneRotationX -= dy * 0.005; prevMouseX = mouseX; prevMouseY = mouseY; } }
-        function touchStarted(event) { if (event.target.tagName === 'CANVAS') { if (touches.length > 0) { isDragging = true; prevMouseX = touches[0].x; prevMouseY = touches[0].y; } return false; } }
-        function touchEnded(event) { isDragging = false; if (event.target.tagName === 'CANVAS') { return false; } }
-        function touchMoved(event) { if (isDragging && touches.length > 0) { let dx = touches[0].x - prevMouseX; let dy = touches[0].y - prevMouseY; targetSceneRotationY += dx * 0.005; targetSceneRotationX -= dy * 0.005; prevMouseX = touches[0].x; prevMouseY = touches[0].y; } if (event.target.tagName === 'CANVAS') { return false; } }
+        
+        // MODIFICATION: Updated touch functions to handle pinch-zoom
+        function touchStarted(event) {
+            if (event.target.tagName === 'CANVAS') {
+                if (touches.length === 1) {
+                    isDragging = true;
+                    prevMouseX = touches[0].x;
+                    prevMouseY = touches[0].y;
+                } else if (touches.length === 2) {
+                    prevTouchDist = dist(touches[0].x, touches[0].y, touches[1].x, touches[1].y);
+                }
+                return false;
+            }
+        }
+
+        function touchEnded(event) {
+            isDragging = false;
+            prevTouchDist = 0;
+            if (event.target.tagName === 'CANVAS') {
+                return false;
+            }
+        }
+
+        function touchMoved(event) {
+            if (isDragging && touches.length === 1) {
+                let dx = touches[0].x - prevMouseX;
+                let dy = touches[0].y - prevMouseY;
+                targetSceneRotationY += dx * 0.005;
+                targetSceneRotationX -= dy * 0.005;
+                prevMouseX = touches[0].x;
+                prevMouseY = touches[0].y;
+            } else if (touches.length === 2) {
+                const currentTouchDist = dist(touches[0].x, touches[0].y, touches[1].x, touches[1].y);
+                const delta = currentTouchDist - prevTouchDist;
+                targetCameraZ -= delta * 2; // Adjust sensitivity as needed
+                targetCameraZ = constrain(targetCameraZ, minZoom, maxZoom);
+                prevTouchDist = currentTouchDist;
+            }
+            if (event.target.tagName === 'CANVAS') {
+                return false;
+            }
+        }
 
         function toggleAudio() {
             if (systemState === 'dormant' || (systemState === 'active' && !audioActive)) {
