@@ -213,7 +213,8 @@
                 this.flowingElements = [];
                 this.flowSpawnRate = floor(random(30, 90));
                 this.maxFlowElements = floor(random(3, 8));
-                this.flowElementBaseSize = random(0.5, 1.5);
+                // MODIFICATION: Reduced the size of flowing elements by 50%
+                this.flowElementBaseSize = random(0.25, 0.75);
                 this.flowDirection = random() < 0.45 ? 1 : (random() < 0.9 ? -1 : 0);
                 this.maxOpacity = random() < 0.33 ? 255 : random(150, 220);
             }
@@ -383,10 +384,9 @@
                 startButton.disabled = true;
                 for (const p of particles) {
                     p.transitionStartPos = p.pos.copy();
-                    // MODIFICATION: Calculate a new random target position each time
                     const newTargetRadius = map(pow(random(1), 2), 0, 1, 170, 300);
                     const direction = p.pos.copy().normalize();
-                    if (direction.magSq() === 0) { // Handle case where particle is at center
+                    if (direction.magSq() === 0) {
                         direction.set(p5.Vector.random3D());
                     }
                     p.targetPos = direction.mult(newTargetRadius);
