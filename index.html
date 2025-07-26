@@ -120,15 +120,18 @@
         let star; 
         const numParticles = 200;
         let centralSphereSize = 150; // Base size for scaling
+        let currentCentralSphereSize; // For transition animation
         let currentVolume = 0;
         let bassEnergy = 0;
         let audioStarted = false; 
         let startButton;
 
-        // NEW: State variables for the awakening transition
+        // State variables for the awakening transition
         let awakeningState = 'dormant'; // 'dormant', 'awakening', 'active'
         let transitionProgress = 0;
-        const transitionDuration = 180; // 3 seconds at 60fps
+        const windUpDuration = 45; // 0.75 seconds
+        const releaseDuration = 22.5; // 0.375 seconds
+        const transitionDuration = windUpDuration + releaseDuration;
 
         // Global scene rotation variables for X, Y, Z axes
         let sceneRotationX = 0;
@@ -230,9 +233,9 @@
             constructor(initialPos, targetPos) {
                 this.initialPos = initialPos;
                 this.targetPos = targetPos;
-                this.pos = initialPos.copy(); // Start at the initial position
+                this.pos = initialPos.copy();
 
-                this.vel = createVector(); // Velocity starts at zero
+                this.vel = createVector();
                 this.acc = createVector(0, 0, 0);
                 this.baseSize = random(1, 4);
                 this.size = this.baseSize * 0.5;
@@ -267,25 +270,28 @@
             }
 
             update() {
-                // MODIFICATION: The update logic now blends forces during the awakening transition.
-                let organicForceFactor = 0;
                 if (awakeningState === 'dormant') {
-                    return;
-                } else if (awakeningState === 'awakening') {
-                    // During awakening, blend between a guiding force and the organic forces.
-                    const lerpAmount = easeInOutCubic(transitionProgress / transitionDuration);
+                    return; 
+                } 
+                
+                let organicForceFactor = 0;
+                if (awakeningState === 'awakening') {
+                    const lerpAmount = transitionProgress / transitionDuration;
+                    organicForceFactor = lerpAmount; 
                     
-                    // Guiding force pushes the sphere towards its target orbit radius
-                    let guidingForce = p5.Vector.sub(this.targetPos, this.pos);
-                    guidingForce.mult(0.01 * (1 - lerpAmount)); // This force weakens over time
-                    this.applyForce(guidingForce);
-
-                    organicForceFactor = lerpAmount; // Organic forces strengthen over time
+                    if (transitionProgress < windUpDuration) {
+                        const phaseProgress = transitionProgress / windUpDuration;
+                        const easeAmount = 1 - pow(1 - phaseProgress, 3); // Ease-out curve
+                        let inwardForce = this.pos.copy().normalize().mult(-0.08 * (1 - easeAmount));
+                        this.applyForce(inwardForce);
+                    } else {
+                        let outwardForce = this.pos.copy().normalize().mult(0.08);
+                        this.applyForce(outwardForce);
+                    }
                 } else { // 'active' state
                     organicForceFactor = 1.0;
                 }
 
-                // Apply organic, physics-based forces, scaled by the transition progress
                 let noiseFactor = 0.001;
                 let nx = map(noise(this.noiseOffset, frameCount * noiseFactor, 0), 0, 1, -this.maxForce, this.maxForce);
                 let ny = map(noise(this.noiseOffset + 1000, frameCount * noiseFactor, 0), 0, 1, -this.maxForce, this.maxForce);
@@ -297,10 +303,10 @@
                     let steer = p5.Vector.sub(createVector(0,0,0), this.pos);
                     steer.setMag(map(currentDistance, this.targetPos.mag(), this.targetPos.mag() + 50, 0, this.maxForce * 0.7));
                     this.applyForce(steer.mult(organicForceFactor));
-                } else if (currentDistance < 160) {
+                } else if (currentDistance < 150) { 
                     let steer = p5.Vector.sub(this.pos, createVector(0,0,0));
-                    steer.setMag(map(currentDistance, 160, 110, 0, this.maxForce * 0.7));
-                    this.applyForce(steer.mult(organicForceFactor));
+                    steer.setMag(map(currentDistance, 150, 100, 0, this.maxForce * 1.5));
+                    this.applyForce(steer);
                 }
 
                 let tangentialForce = createVector(-this.pos.y, this.pos.x, this.pos.z * 0.1).normalize();
@@ -375,7 +381,6 @@
                     const particleColor = color(this.originalRGB[0], this.originalRGB[1], this.originalRGB[2]);
                     const finalColor = lerpColor(particleColor, whiteColor, zoomGradientFactor);
                     
-                    // MODIFICATION: Line opacity is now consistent between awakening and active states.
                     const idleAlpha = 50;
                     const activeAlpha = map(this.currentBrightnessFactor, 0.5, 1.0, idleAlpha, this.maxOpacity);
                     const transitionAlpha = easeInOutCubic(transitionProgress / transitionDuration) * idleAlpha;
@@ -439,8 +444,9 @@
             minZoom = centralSphereSize + 50;
             cameraZ = maxZoom;
             targetCameraZ = cameraZ;
-
-            const initialShellRadius = 160;
+            
+            currentCentralSphereSize = 80;
+            const initialShellRadius = 90;
             const phi = PI * (3.0 - sqrt(5.0)); 
 
             for (let i = 0; i < numParticles; i++) {
@@ -591,6 +597,17 @@
                     awakeningState = 'active';
                     audioStarted = true;
                 }
+                
+                if (transitionProgress < windUpDuration) {
+                    const phaseProgress = transitionProgress / windUpDuration;
+                    currentCentralSphereSize = lerp(80, 60, easeInOutCubic(phaseProgress));
+                } else {
+                    const slowerReleaseDuration = releaseDuration * 1.5;
+                    const phaseProgress = (transitionProgress - windUpDuration) / slowerReleaseDuration;
+                     if (phaseProgress <= 1.0) {
+                        currentCentralSphereSize = lerp(60, centralSphereSize, phaseProgress);
+                    }
+                }
             }
 
             if (audioStarted) {
@@ -648,7 +665,7 @@
                 mainSceneBuffer.push();
                 mainSceneBuffer.noStroke();
                 mainSceneBuffer.fill(0, blackSphereAlpha);
-                mainSceneBuffer.sphere(centralSphereSize, centralSphereDetailX, centralSphereDetailY);
+                mainSceneBuffer.sphere(currentCentralSphereSize, centralSphereDetailX, centralSphereDetailY);
                 mainSceneBuffer.pop();
             }
             mainSceneBuffer.pop();
