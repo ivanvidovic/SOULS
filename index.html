@@ -251,6 +251,13 @@
                 } else if (randFlow < 0.90) {
                     this.flowDirection = -1;
                 }
+                
+                // NEW: Assign a random max opacity for each line
+                if (random() < 0.33) {
+                    this.maxOpacity = 255; // 33% chance to reach full opacity
+                } else {
+                    this.maxOpacity = random(150, 220);
+                }
             }
 
             applyForce(force) {
@@ -289,7 +296,6 @@
                     if (frameCount % this.flowSpawnRate === 0 && this.flowingElements.length < this.maxFlowElements) {
                         this.flowingElements.push({
                             offset: this.flowDirection === 1 ? 0 : 1,
-                            // MODIFICATION: Speed reduced by a factor of 3
                             speed: random(0.000416, 0.00125),
                             size: random(0.625, 1.875) * this.flowElementBaseSize
                         });
@@ -340,13 +346,14 @@
             display(graphicsBuffer, zoomMultiplier, zoomGradientFactor, zoomStrokeMultiplier) {
                 // Draw the connector line
                 graphicsBuffer.push();
-                // Apply zoom-based thinning
-                graphicsBuffer.strokeWeight(map(this.currentBrightnessFactor, 0.5, 1.0, 0.5, 2.5) * zoomStrokeMultiplier);
+                // MODIFICATION: Max line thickness reduced from 2.5 to 1.2 for a thinner look
+                graphicsBuffer.strokeWeight(map(this.currentBrightnessFactor, 0.5, 1.0, 0.5, 1.2) * zoomStrokeMultiplier);
 
                 const whiteColor = color(255);
                 const particleColor = color(this.originalRGB[0], this.originalRGB[1], this.originalRGB[2]);
                 const finalColor = lerpColor(particleColor, whiteColor, zoomGradientFactor);
-                const finalAlpha = this.currentBrightnessFactor * 100;
+                // MODIFICATION: Line alpha now maps from a subdued 50 to its unique maxOpacity.
+                const finalAlpha = map(this.currentBrightnessFactor, 0.5, 1.0, 50, this.maxOpacity);
 
                 graphicsBuffer.stroke(red(finalColor), green(finalColor), blue(finalColor), finalAlpha);
                 graphicsBuffer.line(0, 0, 0, this.pos.x, this.pos.y, this.pos.z);
@@ -527,11 +534,9 @@
             let blackSphereAlpha = map(cameraZ, minZoom, maxZoom, 0, 255, true);
             let zoomSizeMultiplier = map(cameraZ, maxZoom, minZoom, 1.0, 0.5, true);
             
-            // MODIFICATION: The gradient now starts fading in at 66% of the zoom distance.
             const gradientStartZoom = lerp(maxZoom, minZoom, 0.66);
             let zoomGradientFactor = map(cameraZ, gradientStartZoom, minZoom, 0, 1, true);
             
-            // MODIFICATION: New multiplier to make lines thinner when zoomed in.
             let zoomStrokeMultiplier = map(cameraZ, maxZoom, minZoom, 1.0, 0.5, true);
             
             if (audioStarted) {
