@@ -122,8 +122,13 @@
         let centralSphereSize = 150; // Base size for scaling
         let currentVolume = 0;
         let bassEnergy = 0;
-        let audioStarted = false; // Flag to track if audio (mic) has started
+        let audioStarted = false; 
         let startButton;
+
+        // NEW: State variables for the awakening transition
+        let awakeningState = 'dormant'; // 'dormant', 'awakening', 'active'
+        let transitionProgress = 0;
+        const transitionDuration = 180; // 3 seconds at 60fps
 
         // Global scene rotation variables for X, Y, Z axes
         let sceneRotationX = 0;
@@ -222,14 +227,12 @@
         }
 
         class ParticleSphere {
-            constructor() {
-                this.minOrbitRadius = 160;
-                this.maxOrbitRadius = random(170, 300);
+            constructor(initialPos, targetPos) {
+                this.initialPos = initialPos;
+                this.targetPos = targetPos;
+                this.pos = initialPos.copy(); // Start at the initial position
 
-                let initialRadius = map(pow(random(1), 2), 0, 1, this.minOrbitRadius, this.maxOrbitRadius);
-                this.pos = p5.Vector.random3D().mult(initialRadius);
-
-                this.vel = p5.Vector.random3D().mult(random(0.05, 0.2));
+                this.vel = createVector(); // Velocity starts at zero
                 this.acc = createVector(0, 0, 0);
                 this.baseSize = random(1, 4);
                 this.size = this.baseSize * 0.5;
@@ -264,26 +267,45 @@
             }
 
             update() {
+                // MODIFICATION: The update logic now blends forces during the awakening transition.
+                let organicForceFactor = 0;
+                if (awakeningState === 'dormant') {
+                    return;
+                } else if (awakeningState === 'awakening') {
+                    // During awakening, blend between a guiding force and the organic forces.
+                    const lerpAmount = easeInOutCubic(transitionProgress / transitionDuration);
+                    
+                    // Guiding force pushes the sphere towards its target orbit radius
+                    let guidingForce = p5.Vector.sub(this.targetPos, this.pos);
+                    guidingForce.mult(0.01 * (1 - lerpAmount)); // This force weakens over time
+                    this.applyForce(guidingForce);
+
+                    organicForceFactor = lerpAmount; // Organic forces strengthen over time
+                } else { // 'active' state
+                    organicForceFactor = 1.0;
+                }
+
+                // Apply organic, physics-based forces, scaled by the transition progress
                 let noiseFactor = 0.001;
                 let nx = map(noise(this.noiseOffset, frameCount * noiseFactor, 0), 0, 1, -this.maxForce, this.maxForce);
                 let ny = map(noise(this.noiseOffset + 1000, frameCount * noiseFactor, 0), 0, 1, -this.maxForce, this.maxForce);
                 let nz = map(noise(this.noiseOffset + 2000, frameCount * noiseFactor, 0), 0, 1, -this.maxForce, this.maxForce);
-                this.applyForce(createVector(nx, ny, nz));
+                this.applyForce(createVector(nx, ny, nz).mult(organicForceFactor));
 
                 let currentDistance = this.pos.mag();
-                if (currentDistance > this.maxOrbitRadius) {
+                if (currentDistance > this.targetPos.mag()) { 
                     let steer = p5.Vector.sub(createVector(0,0,0), this.pos);
-                    steer.setMag(map(currentDistance, this.maxOrbitRadius, this.maxOrbitRadius + 50, 0, this.maxForce * 0.7));
-                    this.applyForce(steer);
-                } else if (currentDistance < this.minOrbitRadius) {
+                    steer.setMag(map(currentDistance, this.targetPos.mag(), this.targetPos.mag() + 50, 0, this.maxForce * 0.7));
+                    this.applyForce(steer.mult(organicForceFactor));
+                } else if (currentDistance < 160) {
                     let steer = p5.Vector.sub(this.pos, createVector(0,0,0));
-                    steer.setMag(map(currentDistance, this.minOrbitRadius, this.minOrbitRadius - 50, 0, this.maxForce * 0.7));
-                    this.applyForce(steer);
+                    steer.setMag(map(currentDistance, 160, 110, 0, this.maxForce * 0.7));
+                    this.applyForce(steer.mult(organicForceFactor));
                 }
 
                 let tangentialForce = createVector(-this.pos.y, this.pos.x, this.pos.z * 0.1).normalize();
                 tangentialForce.mult(this.maxForce * 0.2);
-                this.applyForce(tangentialForce);
+                this.applyForce(tangentialForce.mult(organicForceFactor));
 
                 this.vel.add(this.acc);
                 this.vel.limit(this.maxSpeed);
@@ -291,7 +313,7 @@
                 this.acc.mult(0);
                 this.vel.mult(0.95);
 
-                if (this.flowDirection !== 0) {
+                if (awakeningState === 'active' && this.flowDirection !== 0) {
                     if (frameCount % this.flowSpawnRate === 0 && this.flowingElements.length < this.maxFlowElements) {
                         this.flowingElements.push({
                             offset: this.flowDirection === 1 ? 0 : 1,
@@ -310,11 +332,13 @@
             }
 
             applyAudioInfluence(history) {
+                if (awakeningState !== 'active') return;
+
                 let currentDistance = this.pos.mag();
                 
                 let distanceInfluenceFactor = map(currentDistance, TAPER_START_RADIUS, TAPER_END_RADIUS, 1.0, 0.1, true);
                 
-                let delayFrames = floor(constrain(map(currentDistance, this.minOrbitRadius, this.maxOrbitRadius, 0, historyLength - 1), 0, historyLength - 1));
+                let delayFrames = floor(constrain(map(currentDistance, 160, 300, 0, historyLength - 1), 0, historyLength - 1));
                 let delayedAudio = history[(historyLength - 1) - delayFrames] || { volume: 0, bass: 0 };
 
                 let effectiveAmplitude = (delayedAudio.volume > minActivationVolume) ? delayedAudio.volume : 0;
@@ -343,50 +367,56 @@
             }
 
             display(graphicsBuffer, zoomMultiplier, zoomGradientFactor, zoomStrokeMultiplier) {
-                // REVERTED: Connector line is now a simple, solid line again.
-                graphicsBuffer.push();
-                graphicsBuffer.strokeWeight(map(this.currentBrightnessFactor, 0.5, 1.0, 0.5, 1.2) * zoomStrokeMultiplier);
-
-                const whiteColor = color(255);
-                const particleColor = color(this.originalRGB[0], this.originalRGB[1], this.originalRGB[2]);
-                const finalColor = lerpColor(particleColor, whiteColor, zoomGradientFactor);
-                const finalAlpha = map(this.currentBrightnessFactor, 0.5, 1.0, 50, this.maxOpacity);
-
-                graphicsBuffer.stroke(red(finalColor), green(finalColor), blue(finalColor), finalAlpha);
-                graphicsBuffer.line(0, 0, 0, this.pos.x, this.pos.y, this.pos.z);
-                graphicsBuffer.pop();
-
-                // Draw flowing elements
-                if (this.flowDirection !== 0) {
+                if (awakeningState === 'awakening' || awakeningState === 'active') {
                     graphicsBuffer.push();
-                    graphicsBuffer.blendMode(ADD);
-                    let centerPoint = createVector(0, 0, 0);
-                    for (let flowEl of this.flowingElements) {
-                        let pFlow = (this.flowDirection === 1) ?
-                            p5.Vector.lerp(centerPoint, this.pos, flowEl.offset) :
-                            p5.Vector.lerp(this.pos, centerPoint, 1 - flowEl.offset);
+                    graphicsBuffer.strokeWeight(map(this.currentBrightnessFactor, 0.5, 1.0, 0.5, 1.2) * zoomStrokeMultiplier);
 
-                        let flowProgressAlpha = (this.flowDirection === -1) ? 1 - flowEl.offset : flowEl.offset;
-                        let flowAlpha = 255;
-                        if (flowProgressAlpha < 0.1) flowAlpha = map(flowProgressAlpha, 0, 0.1, 100, 255);
-                        else if (flowProgressAlpha > 0.9) flowAlpha = map(flowProgressAlpha, 0.9, 1, 255, 100);
+                    const whiteColor = color(255);
+                    const particleColor = color(this.originalRGB[0], this.originalRGB[1], this.originalRGB[2]);
+                    const finalColor = lerpColor(particleColor, whiteColor, zoomGradientFactor);
+                    
+                    // MODIFICATION: Line opacity is now consistent between awakening and active states.
+                    const idleAlpha = 50;
+                    const activeAlpha = map(this.currentBrightnessFactor, 0.5, 1.0, idleAlpha, this.maxOpacity);
+                    const transitionAlpha = easeInOutCubic(transitionProgress / transitionDuration) * idleAlpha;
+                    const finalAlpha = (awakeningState === 'awakening') ? transitionAlpha : activeAlpha;
 
-                        flowAlpha = constrain(this.currentBrightnessFactor * flowAlpha, 0, 255);
-                        
-                        let sizeMultiplier = map(this.currentBrightnessFactor, 0.5, 1.0, 0.5, 1.0, true);
-                        let displaySize = flowEl.size * sizeMultiplier * zoomMultiplier;
 
-                        graphicsBuffer.noStroke();
-                        graphicsBuffer.fill(this.originalRGB[0], this.originalRGB[1], this.originalRGB[2], flowAlpha);
+                    graphicsBuffer.stroke(red(finalColor), green(finalColor), blue(finalColor), finalAlpha);
+                    graphicsBuffer.line(0, 0, 0, this.pos.x, this.pos.y, this.pos.z);
+                    graphicsBuffer.pop();
+
+                    if (awakeningState === 'active' && this.flowDirection !== 0) {
                         graphicsBuffer.push();
-                        graphicsBuffer.translate(pFlow.x, pFlow.y, pFlow.z);
-                        graphicsBuffer.sphere(displaySize);
+                        graphicsBuffer.blendMode(ADD);
+                        let centerPoint = createVector(0, 0, 0);
+                        for (let flowEl of this.flowingElements) {
+                            let pFlow = (this.flowDirection === 1) ?
+                                p5.Vector.lerp(centerPoint, this.pos, flowEl.offset) :
+                                p5.Vector.lerp(this.pos, centerPoint, 1 - flowEl.offset);
+
+                            let flowProgressAlpha = (this.flowDirection === -1) ? 1 - flowEl.offset : flowEl.offset;
+                            let flowAlpha = 255;
+                            if (flowProgressAlpha < 0.1) flowAlpha = map(flowProgressAlpha, 0, 0.1, 100, 255);
+                            else if (flowProgressAlpha > 0.9) flowAlpha = map(flowProgressAlpha, 0.9, 1, 255, 100);
+
+                            flowAlpha = constrain(this.currentBrightnessFactor * flowAlpha, 0, 255);
+                            
+                            let sizeMultiplier = map(this.currentBrightnessFactor, 0.5, 1.0, 0.5, 1.0, true);
+                            let displaySize = flowEl.size * sizeMultiplier * zoomMultiplier;
+
+                            graphicsBuffer.noStroke();
+                            graphicsBuffer.fill(this.originalRGB[0], this.originalRGB[1], this.originalRGB[2], flowAlpha);
+                            graphicsBuffer.push();
+                            graphicsBuffer.translate(pFlow.x, pFlow.y, pFlow.z);
+                            graphicsBuffer.sphere(displaySize);
+                            graphicsBuffer.pop();
+                        }
                         graphicsBuffer.pop();
                     }
-                    graphicsBuffer.pop();
                 }
 
-                // Draw the main solid sphere
+                // Draw the main solid sphere (always visible)
                 graphicsBuffer.push();
                 graphicsBuffer.translate(this.pos.x, this.pos.y, this.pos.z);
                 graphicsBuffer.noStroke();
@@ -405,14 +435,29 @@
             mainSceneBuffer = createGraphics(width, height, WEBGL);
             mainSceneBuffer.pixelDensity(1);
 
-            // Initialize camera zoom settings
-            maxZoom = (height / 2) / tan(PI / 6); // Default camera position
-            minZoom = centralSphereSize + 50; // Closest zoom distance
-            cameraZ = maxZoom; // Start at the farthest zoom
-            targetCameraZ = cameraZ; // Initialize target zoom
+            maxZoom = (height / 2) / tan(PI / 6);
+            minZoom = centralSphereSize + 50;
+            cameraZ = maxZoom;
+            targetCameraZ = cameraZ;
+
+            const initialShellRadius = 160;
+            const phi = PI * (3.0 - sqrt(5.0)); 
 
             for (let i = 0; i < numParticles; i++) {
-                particles.push(new ParticleSphere());
+                let y = 1 - (i / (numParticles - 1)) * 2; 
+                let radius = sqrt(1 - y * y); 
+                let theta = phi * i; 
+                let x = cos(theta) * radius;
+                let z = sin(theta) * radius;
+                const initialPos = createVector(x, y, z).mult(initialShellRadius);
+
+                const initialDirection = initialPos.copy().normalize();
+                const targetMaxOrbit = random(170, 300);
+                const targetMinOrbit = 160;
+                const targetRadius = map(pow(random(1), 2), 0, 1, targetMinOrbit, targetMaxOrbit);
+                const targetPos = initialDirection.mult(targetRadius);
+                
+                particles.push(new ParticleSphere(initialPos, targetPos));
             }
             
             star = new Star();
@@ -484,7 +529,11 @@
         }
 
         function startAudio() {
-            if (audioStarted) return;
+            if (awakeningState !== 'dormant') return;
+            
+            awakeningState = 'awakening'; // Start the transition
+            startButton.disabled = true;
+
             if (getAudioContext().state === 'suspended') {
                 getAudioContext().resume();
             }
@@ -492,14 +541,16 @@
             fft = new p5.FFT(0.8, 128);
             fft.setInput(mic);
             mic.start(() => {
-                audioStarted = true;
-                startButton.disabled = true;
+                // Audio is ready, but we wait for the transition to finish
             }, (err) => {
                 console.error("Microphone access error:", err);
                 showMessageBox("Microphone access denied or not available. Please allow microphone access to enable voice reactivity.");
-                audioStarted = true; 
-                startButton.disabled = true;
             });
+        }
+
+        // Easing function for a smooth transition
+        function easeInOutCubic(t) {
+            return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
         }
 
         function windowResized() {
@@ -530,12 +581,18 @@
 
             let blackSphereAlpha = map(cameraZ, minZoom, maxZoom, 0, 255, true);
             let zoomSizeMultiplier = map(cameraZ, maxZoom, minZoom, 1.0, 0.5, true);
-            
             const gradientStartZoom = lerp(maxZoom, minZoom, 0.66);
             let zoomGradientFactor = map(cameraZ, gradientStartZoom, minZoom, 0, 1, true);
-            
             let zoomStrokeMultiplier = map(cameraZ, maxZoom, minZoom, 1.0, 0.5, true);
             
+            if (awakeningState === 'awakening') {
+                transitionProgress++;
+                if (transitionProgress >= transitionDuration) {
+                    awakeningState = 'active';
+                    audioStarted = true;
+                }
+            }
+
             if (audioStarted) {
                 if (mic && mic.enabled && getAudioContext().state === 'running') {
                     currentVolume = mic.getLevel();
