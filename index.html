@@ -239,8 +239,12 @@
                 this.noiseOffset = random(1000);
                 this.maxSpeed = random(0.8, 1.5);
                 this.maxForce = random(0.04, 0.08);
-                this.positionHistory = [];
-                this.historyLength = 8;
+                
+                // REVERT: Flowing elements are back
+                this.flowingElements = [];
+                this.flowSpawnRate = floor(random(30, 90));
+                this.maxFlowElements = floor(random(3, 8));
+                this.flowElementBaseSize = random(0.5, 1.5);
                 this.flowDirection = 0;
                 let randFlow = random();
                 if (randFlow < 0.45) {
@@ -248,10 +252,6 @@
                 } else if (randFlow < 0.90) {
                     this.flowDirection = -1;
                 }
-                this.flowingElements = [];
-                this.flowSpawnRate = floor(random(30, 90));
-                this.maxFlowElements = floor(random(3, 8));
-                this.flowElementBaseSize = random(0.5, 1.5);
             }
 
             applyForce(force) {
@@ -286,11 +286,7 @@
                 this.acc.mult(0);
                 this.vel.mult(0.95);
 
-                this.positionHistory.push(this.pos.copy());
-                if (this.positionHistory.length > this.historyLength) {
-                    this.positionHistory.shift();
-                }
-
+                // REVERT: Update logic for flowing elements is back
                 if (this.flowDirection !== 0) {
                     if (frameCount % this.flowSpawnRate === 0 && this.flowingElements.length < this.maxFlowElements) {
                         this.flowingElements.push({
@@ -343,22 +339,7 @@
             }
 
             display(graphicsBuffer, zoomMultiplier, zoomGradientFactor) {
-                if (this.flowDirection === 0) return;
-
-                for (let i = 0; i < this.positionHistory.length; i++) {
-                    let p = this.positionHistory[i];
-                    let internalGlowAlpha = map(i, 0, this.historyLength, 0, this.currentBrightnessFactor * 200);
-                    internalGlowAlpha = constrain(internalGlowAlpha, 0, 255);
-
-                    graphicsBuffer.push();
-                    graphicsBuffer.noStroke();
-                    graphicsBuffer.fill(this.originalRGB[0], this.originalRGB[1], this.originalRGB[2], internalGlowAlpha);
-                    graphicsBuffer.blendMode(ADD);
-                    graphicsBuffer.sphere(map(i, 0, this.historyLength, this.size * 0.1, this.size * 0.6));
-                    graphicsBuffer.pop();
-                }
-
-                // MODIFICATION: Connector line drawing logic updated for gradient effect.
+                // Draw the connector line
                 graphicsBuffer.push();
                 graphicsBuffer.strokeWeight(map(this.currentBrightnessFactor, 0.5, 1.0, 0.5, 2.5));
 
@@ -367,29 +348,11 @@
                 const finalColor = lerpColor(particleColor, whiteColor, zoomGradientFactor);
                 const finalAlpha = this.currentBrightnessFactor * 100;
 
-                if (zoomGradientFactor > 0) {
-                    // Draw line in segments for gradient
-                    const segments = 10;
-                    for (let i = 0; i < segments; i++) {
-                        const startLerp = i / segments;
-                        const endLerp = (i + 1) / segments;
-                        const start = p5.Vector.lerp(createVector(0,0,0), this.pos, startLerp);
-                        const end = p5.Vector.lerp(createVector(0,0,0), this.pos, endLerp);
-                        
-                        const segmentColor = lerpColor(whiteColor, particleColor, endLerp);
-                        const finalSegmentColor = lerpColor(segmentColor, whiteColor, zoomGradientFactor * (1 - endLerp));
-                        
-                        graphicsBuffer.stroke(red(finalSegmentColor), green(finalSegmentColor), blue(finalSegmentColor), finalAlpha);
-                        graphicsBuffer.line(start.x, start.y, start.z, end.x, end.y, end.z);
-                    }
-                } else {
-                    // Draw solid line when zoomed out
-                    graphicsBuffer.stroke(red(finalColor), green(finalColor), blue(finalColor), finalAlpha);
-                    graphicsBuffer.line(0, 0, 0, this.pos.x, this.pos.y, this.pos.z);
-                }
+                graphicsBuffer.stroke(red(finalColor), green(finalColor), blue(finalColor), finalAlpha);
+                graphicsBuffer.line(0, 0, 0, this.pos.x, this.pos.y, this.pos.z);
                 graphicsBuffer.pop();
 
-
+                // REVERT: Flowing elements are drawn again
                 if (this.flowDirection !== 0) {
                     graphicsBuffer.push();
                     graphicsBuffer.blendMode(ADD);
@@ -419,14 +382,10 @@
                     graphicsBuffer.pop();
                 }
 
+                // Draw the main solid sphere
                 graphicsBuffer.push();
                 graphicsBuffer.translate(this.pos.x, this.pos.y, this.pos.z);
                 graphicsBuffer.noStroke();
-                graphicsBuffer.push();
-                graphicsBuffer.fill(this.originalRGB[0], this.originalRGB[1], this.originalRGB[2], this.currentBrightnessFactor * 150);
-                graphicsBuffer.blendMode(ADD);
-                graphicsBuffer.sphere(this.size * 1.8);
-                graphicsBuffer.pop();
                 graphicsBuffer.fill(this.originalRGB[0] * this.currentBrightnessFactor,
                                      this.originalRGB[1] * this.currentBrightnessFactor,
                                      this.originalRGB[2] * this.currentBrightnessFactor, 255);
@@ -567,7 +526,6 @@
 
             let blackSphereAlpha = map(cameraZ, minZoom, maxZoom, 0, 255, true);
             let zoomSizeMultiplier = map(cameraZ, maxZoom, minZoom, 1.0, 0.5, true);
-            // NEW: Calculate how much to blend the line color to white based on zoom.
             let zoomGradientFactor = map(cameraZ, maxZoom, minZoom, 0, 1, true);
             
             if (audioStarted) {
