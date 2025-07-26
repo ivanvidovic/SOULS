@@ -116,70 +116,41 @@
     <script>
         let mic;
         let fft;
-        let particles = []; // For the orbiting spheres with lines
+        let particles = [];
         let star; 
         const numParticles = 200;
-        let centralSphereSize = 150; // Base size for scaling
-        let currentCentralSphereSize; // For transition animation
+        let centralSphereSize = 150;
+        let dormantCentralSphereSize = 80;
+        let currentCentralSphereSize;
         let currentVolume = 0;
         let bassEnergy = 0;
-        let audioStarted = false; 
         let startButton;
 
-        // State variables for the awakening transition
-        let awakeningState = 'dormant'; // 'dormant', 'awakening', 'active'
+        let systemState = 'dormant'; // dormant, transitioningOut, active, transitioningIn
+        let audioActive = false;
         let transitionProgress = 0;
-        const sphereTransitionDuration = 45; 
-        // MODIFICATION: Changed black sphere transition duration from 90 to 60
-        const blackSphereTransitionDuration = 60; 
+        const transitionDuration = 40;
+        const initialShellRadius = 90;
 
-        // Global scene rotation variables for X, Y, Z axes
-        let sceneRotationX = 0;
-        let sceneRotationY = 0;
-        let sceneRotationZ = 0;
-        let sceneNoiseOffsetX = 10000;
-        let sceneNoiseOffsetY = 0;
-        let sceneNoiseOffsetZ = 20000;
-
-        // Variables for interactive orbiting controls
-        let targetSceneRotationX = 0;
-        let targetSceneRotationY = 0;
+        let sceneRotationX = 0, sceneRotationY = 0, sceneRotationZ = 0;
+        let sceneNoiseOffsetX = 10000, sceneNoiseOffsetY = 0, sceneNoiseOffsetZ = 20000;
+        let targetSceneRotationX = 0, targetSceneRotationY = 0;
         const rotationLerpFactor = 0.08;
         let isDragging = false;
-        let prevMouseX = 0;
-        let prevMouseY = 0;
+        let prevMouseX = 0, prevMouseY = 0;
 
-        // Variables for smooth camera zoom control
-        let cameraZ;
-        let targetCameraZ; // The zoom level we want to be at
-        let minZoom;
-        let maxZoom;
-        const zoomLerpFactor = 0.1; // Easing factor for smooth zoom
+        let cameraZ, targetCameraZ, minZoom, maxZoom;
+        const zoomLerpFactor = 0.1;
 
-        // Audio history for delayed response
         let audioHistory = [];
         const historyLength = 8;
         const minActivationVolume = 0.15;
         const minActivationBass = 120;
 
-        // Fixed detail for the chunky central sphere
-        const centralSphereDetailX = 24;
-        const centralSphereDetailY = 16;
-
-        // Define the custom hex colors for the small spheres
-        const sphereColors = [
-            [197, 62, 192], // #C53EC0 (Purple)
-            [66, 255, 255],  // #42FFFF (Cyan)
-            [182, 147, 154], // #B6939A (Rose Gray)
-            [47, 28, 114],   // #2F1C72 (Dark Indigo)
-            [255, 89, 126]   // #FF597E (Pink Red)
-        ];
-
-        // p5.Graphics buffer for off-screen rendering
+        const centralSphereDetailX = 24, centralSphereDetailY = 16;
+        const sphereColors = [[197, 62, 192], [66, 255, 255], [182, 147, 154], [47, 28, 114], [255, 89, 126]];
         let mainSceneBuffer;
-
-        const TAPER_START_RADIUS = 160;
-        const TAPER_END_RADIUS = 300;
+        const TAPER_START_RADIUS = 160, TAPER_END_RADIUS = 300;
 
         function showMessageBox(message) {
             document.getElementById('message-content').innerText = message;
@@ -195,36 +166,29 @@
                 this.baseCoreSize = 2;
                 this.coreSize = this.baseCoreSize;
                 this.targetCoreSize = this.baseCoreSize;
-                
                 this.rotation = createVector(random(TWO_PI), random(TWO_PI), random(TWO_PI));
                 this.rotationSpeed = createVector(random(-0.005, 0.005), random(-0.005, 0.005), random(-0.005, 0.005));
             }
-
             applyAudioInfluence(volume, bass) {
                 let effectiveVolume = (volume > minActivationVolume) ? volume : 0;
                 let effectiveBass = (bass > minActivationBass) ? bass : 0;
                 let volumeInfluenceAmount = map(effectiveVolume, minActivationVolume, 0.6, 0, 1, true);
                 let bassInfluenceAmount = map(effectiveBass, minActivationBass, 200, 0, 1, true);
                 let totalAudioInfluence = max(volumeInfluenceAmount, bassInfluenceAmount);
-
                 this.targetCoreSize = this.baseCoreSize + (this.baseCoreSize * 10 * totalAudioInfluence);
             }
-
             update() {
                 this.coreSize = lerp(this.coreSize, this.targetCoreSize, 0.1);
                 this.rotation.add(this.rotationSpeed);
             }
-
             display(graphicsBuffer) {
                 graphicsBuffer.push();
                 graphicsBuffer.rotateX(this.rotation.x);
                 graphicsBuffer.rotateY(this.rotation.y);
                 graphicsBuffer.rotateZ(this.rotation.z);
-                
                 graphicsBuffer.noStroke();
                 graphicsBuffer.fill(255, 255, 255, 255); 
                 graphicsBuffer.sphere(this.coreSize);
-                
                 graphicsBuffer.pop();
             }
         }
@@ -234,50 +198,30 @@
                 this.initialPos = initialPos;
                 this.targetPos = targetPos;
                 this.pos = initialPos.copy();
-
+                this.transitionStartPos = initialPos.copy();
+                this.returnTargetPos = initialPos.copy();
                 this.vel = createVector();
-                this.acc = createVector(0, 0, 0);
+                this.acc = createVector();
                 this.baseSize = random(1, 4);
                 this.size = this.baseSize * 0.5;
                 this.targetSize = this.baseSize * 0.5;
-                this.originalRGB = sphereColors[floor(random(sphereColors.length))];
+                this.originalRGB = random(sphereColors);
                 this.currentBrightnessFactor = 0.5;
                 this.noiseOffset = random(1000);
                 this.maxSpeed = random(0.8, 1.5);
                 this.maxForce = random(0.04, 0.08);
-                
                 this.flowingElements = [];
                 this.flowSpawnRate = floor(random(30, 90));
                 this.maxFlowElements = floor(random(3, 8));
                 this.flowElementBaseSize = random(0.5, 1.5);
-                this.flowDirection = 0;
-                let randFlow = random();
-                if (randFlow < 0.45) {
-                    this.flowDirection = 1;
-                } else if (randFlow < 0.90) {
-                    this.flowDirection = -1;
-                }
-                
-                if (random() < 0.33) {
-                    this.maxOpacity = 255; 
-                } else {
-                    this.maxOpacity = random(150, 220);
-                }
+                this.flowDirection = random() < 0.45 ? 1 : (random() < 0.9 ? -1 : 0);
+                this.maxOpacity = random() < 0.33 ? 255 : random(150, 220);
             }
 
-            applyForce(force) {
-                this.acc.add(force);
-            }
+            applyForce(force) { this.acc.add(force); }
 
             update() {
-                if (awakeningState === 'dormant') {
-                    return; 
-                } 
-                
-                if (awakeningState === 'awakening') {
-                    const lerpAmount = easeInOutCubic(transitionProgress / sphereTransitionDuration);
-                    this.pos = p5.Vector.lerp(this.initialPos, this.targetPos, lerpAmount);
-                } else { // 'active' state
+                if (systemState === 'active' && audioActive) {
                     let organicForceFactor = 1.0;
                     let noiseFactor = 0.001;
                     let nx = map(noise(this.noiseOffset, frameCount * noiseFactor, 0), 0, 1, -this.maxForce, this.maxForce);
@@ -307,13 +251,9 @@
                     this.vel.mult(0.95);
                 }
 
-                if (awakeningState === 'active' && this.flowDirection !== 0) {
+                if (systemState === 'active' && audioActive && this.flowDirection !== 0) {
                     if (frameCount % this.flowSpawnRate === 0 && this.flowingElements.length < this.maxFlowElements) {
-                        this.flowingElements.push({
-                            offset: this.flowDirection === 1 ? 0 : 1,
-                            speed: random(0.000416, 0.00125),
-                            size: random(0.625, 1.875) * this.flowElementBaseSize
-                        });
+                        this.flowingElements.push({ offset: this.flowDirection === 1 ? 0 : 1, speed: random(0.000416, 0.00125), size: random(0.625, 1.875) * this.flowElementBaseSize });
                     }
                     for (let i = this.flowingElements.length - 1; i >= 0; i--) {
                         let flowEl = this.flowingElements[i];
@@ -322,100 +262,74 @@
                             this.flowingElements.splice(i, 1);
                         }
                     }
+                } else {
+                    this.flowingElements = [];
                 }
             }
 
             applyAudioInfluence(history) {
-                if (awakeningState !== 'active') return;
-
+                if (!audioActive) {
+                    this.targetSize = this.baseSize * 0.5;
+                    this.currentBrightnessFactor = lerp(this.currentBrightnessFactor, 0.5, 0.1);
+                    this.size = lerp(this.size, this.targetSize, 0.1);
+                    return;
+                }
                 let currentDistance = this.pos.mag();
-                
                 let distanceInfluenceFactor = map(currentDistance, TAPER_START_RADIUS, TAPER_END_RADIUS, 1.0, 0.1, true);
-                
                 let delayFrames = floor(constrain(map(currentDistance, 160, 300, 0, historyLength - 1), 0, historyLength - 1));
                 let delayedAudio = history[(historyLength - 1) - delayFrames] || { volume: 0, bass: 0 };
-
                 let effectiveAmplitude = (delayedAudio.volume > minActivationVolume) ? delayedAudio.volume : 0;
                 let effectiveBass = (delayedAudio.bass > minActivationBass) ? delayedAudio.bass : 0;
-
                 let volumeInfluenceAmount = map(effectiveAmplitude, minActivationVolume, 0.6, 0, 1, true);
                 let bassInfluenceAmount = map(effectiveBass, minActivationBass, 200, 0, 1, true);
                 let totalAudioInfluence = max(volumeInfluenceAmount, bassInfluenceAmount) * distanceInfluenceFactor;
-
                 this.targetSize = (this.baseSize * 0.5) + (this.baseSize * 9.0 * totalAudioInfluence);
                 let targetBrightness = (totalAudioInfluence > 0) ? 1.0 : 0.5;
-
-                let lerpFactorBrightness = 0.1;
-                if (targetBrightness < this.currentBrightnessFactor) {
-                    lerpFactorBrightness = 0.3;
-                }
-                this.currentBrightnessFactor = lerp(this.currentBrightnessFactor, targetBrightness, lerpFactorBrightness);
-
-                let lerpFactorSize;
-                if (this.targetSize > this.size) {
-                    lerpFactorSize = 0.1;
-                } else {
-                    lerpFactorSize = 0.3;
-                }
-                this.size = lerp(this.size, this.targetSize, lerpFactorSize);
+                this.currentBrightnessFactor = lerp(this.currentBrightnessFactor, targetBrightness, targetBrightness < this.currentBrightnessFactor ? 0.3 : 0.1);
+                this.size = lerp(this.size, this.targetSize, this.targetSize > this.size ? 0.1 : 0.3);
             }
 
             display(graphicsBuffer, zoomMultiplier, zoomGradientFactor, zoomStrokeMultiplier) {
-                if (awakeningState === 'awakening' || awakeningState === 'active') {
+                graphicsBuffer.push();
+                graphicsBuffer.strokeWeight(map(this.currentBrightnessFactor, 0.5, 1.0, 0.5, 1.2) * zoomStrokeMultiplier);
+                const whiteColor = color(255);
+                const particleColor = color(this.originalRGB[0], this.originalRGB[1], this.originalRGB[2]);
+                const finalColor = lerpColor(particleColor, whiteColor, zoomGradientFactor);
+                const idleAlpha = 50;
+                const activeAlpha = map(this.currentBrightnessFactor, 0.5, 1.0, idleAlpha, this.maxOpacity);
+                graphicsBuffer.stroke(red(finalColor), green(finalColor), blue(finalColor), activeAlpha);
+                graphicsBuffer.line(0, 0, 0, this.pos.x, this.pos.y, this.pos.z);
+                graphicsBuffer.pop();
+
+                if (audioActive && this.flowDirection !== 0) {
                     graphicsBuffer.push();
-                    graphicsBuffer.strokeWeight(map(this.currentBrightnessFactor, 0.5, 1.0, 0.5, 1.2) * zoomStrokeMultiplier);
-
-                    const whiteColor = color(255);
-                    const particleColor = color(this.originalRGB[0], this.originalRGB[1], this.originalRGB[2]);
-                    const finalColor = lerpColor(particleColor, whiteColor, zoomGradientFactor);
-                    
-                    const idleAlpha = 50;
-                    const activeAlpha = map(this.currentBrightnessFactor, 0.5, 1.0, idleAlpha, this.maxOpacity);
-                    const transitionAlpha = easeInOutCubic(transitionProgress / sphereTransitionDuration) * idleAlpha;
-                    const finalAlpha = (awakeningState === 'awakening') ? transitionAlpha : activeAlpha;
-
-
-                    graphicsBuffer.stroke(red(finalColor), green(finalColor), blue(finalColor), finalAlpha);
-                    graphicsBuffer.line(0, 0, 0, this.pos.x, this.pos.y, this.pos.z);
-                    graphicsBuffer.pop();
-
-                    if (awakeningState === 'active' && this.flowDirection !== 0) {
+                    graphicsBuffer.blendMode(ADD);
+                    let centerPoint = createVector(0, 0, 0);
+                    for (let flowEl of this.flowingElements) {
+                        let pFlow = (this.flowDirection === 1) ?
+                            p5.Vector.lerp(centerPoint, this.pos, flowEl.offset) :
+                            p5.Vector.lerp(this.pos, centerPoint, 1 - flowEl.offset);
+                        let flowProgressAlpha = (this.flowDirection === -1) ? 1 - flowEl.offset : flowEl.offset;
+                        let flowAlpha = 255;
+                        if (flowProgressAlpha < 0.1) flowAlpha = map(flowProgressAlpha, 0, 0.1, 100, 255);
+                        else if (flowProgressAlpha > 0.9) flowAlpha = map(flowProgressAlpha, 0.9, 1, 255, 100);
+                        flowAlpha = constrain(this.currentBrightnessFactor * flowAlpha, 0, 255);
+                        let sizeMultiplier = map(this.currentBrightnessFactor, 0.5, 1.0, 0.5, 1.0, true);
+                        let displaySize = flowEl.size * sizeMultiplier * zoomMultiplier;
+                        graphicsBuffer.noStroke();
+                        graphicsBuffer.fill(this.originalRGB[0], this.originalRGB[1], this.originalRGB[2], flowAlpha);
                         graphicsBuffer.push();
-                        graphicsBuffer.blendMode(ADD);
-                        let centerPoint = createVector(0, 0, 0);
-                        for (let flowEl of this.flowingElements) {
-                            let pFlow = (this.flowDirection === 1) ?
-                                p5.Vector.lerp(centerPoint, this.pos, flowEl.offset) :
-                                p5.Vector.lerp(this.pos, centerPoint, 1 - flowEl.offset);
-
-                            let flowProgressAlpha = (this.flowDirection === -1) ? 1 - flowEl.offset : flowEl.offset;
-                            let flowAlpha = 255;
-                            if (flowProgressAlpha < 0.1) flowAlpha = map(flowProgressAlpha, 0, 0.1, 100, 255);
-                            else if (flowProgressAlpha > 0.9) flowAlpha = map(flowProgressAlpha, 0.9, 1, 255, 100);
-
-                            flowAlpha = constrain(this.currentBrightnessFactor * flowAlpha, 0, 255);
-                            
-                            let sizeMultiplier = map(this.currentBrightnessFactor, 0.5, 1.0, 0.5, 1.0, true);
-                            let displaySize = flowEl.size * sizeMultiplier * zoomMultiplier;
-
-                            graphicsBuffer.noStroke();
-                            graphicsBuffer.fill(this.originalRGB[0], this.originalRGB[1], this.originalRGB[2], flowAlpha);
-                            graphicsBuffer.push();
-                            graphicsBuffer.translate(pFlow.x, pFlow.y, pFlow.z);
-                            graphicsBuffer.sphere(displaySize);
-                            graphicsBuffer.pop();
-                        }
+                        graphicsBuffer.translate(pFlow.x, pFlow.y, pFlow.z);
+                        graphicsBuffer.sphere(displaySize);
                         graphicsBuffer.pop();
                     }
+                    graphicsBuffer.pop();
                 }
 
-                // Draw the main solid sphere (always visible)
                 graphicsBuffer.push();
                 graphicsBuffer.translate(this.pos.x, this.pos.y, this.pos.z);
                 graphicsBuffer.noStroke();
-                graphicsBuffer.fill(this.originalRGB[0] * this.currentBrightnessFactor,
-                                     this.originalRGB[1] * this.currentBrightnessFactor,
-                                     this.originalRGB[2] * this.currentBrightnessFactor, 255);
+                graphicsBuffer.fill(this.originalRGB[0] * this.currentBrightnessFactor, this.originalRGB[1] * this.currentBrightnessFactor, this.originalRGB[2] * this.currentBrightnessFactor, 255);
                 graphicsBuffer.sphere(this.size);
                 graphicsBuffer.pop();
             }
@@ -424,19 +338,15 @@
         function setup() {
             createCanvas(windowWidth, windowHeight, WEBGL);
             pixelDensity(1);
-
             mainSceneBuffer = createGraphics(width, height, WEBGL);
             mainSceneBuffer.pixelDensity(1);
-
             maxZoom = (height / 2) / tan(PI / 6);
             minZoom = centralSphereSize + 50;
             cameraZ = maxZoom;
             targetCameraZ = cameraZ;
+            currentCentralSphereSize = dormantCentralSphereSize; 
             
-            currentCentralSphereSize = 80;
-            const initialShellRadius = 90;
             const phi = PI * (3.0 - sqrt(5.0)); 
-
             for (let i = 0; i < numParticles; i++) {
                 let y = 1 - (i / (numParticles - 1)) * 2; 
                 let radius = sqrt(1 - y * y); 
@@ -444,108 +354,70 @@
                 let x = cos(theta) * radius;
                 let z = sin(theta) * radius;
                 const initialPos = createVector(x, y, z).mult(initialShellRadius);
-
-                const initialDirection = initialPos.copy().normalize();
                 const targetMaxOrbit = random(170, 300);
                 const targetMinOrbit = 160;
                 const targetRadius = map(pow(random(1), 2), 0, 1, targetMinOrbit, targetMaxOrbit);
-                const targetPos = initialDirection.mult(targetRadius);
-                
+                const targetPos = initialPos.copy().normalize().mult(targetRadius);
                 particles.push(new ParticleSphere(initialPos, targetPos));
             }
-            
             star = new Star();
-
             startButton = document.getElementById('startButton');
-            startButton.addEventListener('click', startAudio);
-
+            startButton.addEventListener('click', toggleAudio);
             targetSceneRotationX = sceneRotationX;
             targetSceneRotationY = sceneRotationY;
         }
 
-        function mouseWheel(event) {
-            targetCameraZ += event.delta * 0.75;
-            targetCameraZ = constrain(targetCameraZ, minZoom, maxZoom);
-            return false;
-        }
+        function mouseWheel(event) { targetCameraZ = constrain(targetCameraZ + event.delta * 0.75, minZoom, maxZoom); return false; }
+        function mousePressed() { isDragging = true; prevMouseX = mouseX; prevMouseY = mouseY; }
+        function mouseReleased() { isDragging = false; }
+        function mouseDragged() { if (isDragging) { let dx = mouseX - prevMouseX; let dy = mouseY - prevMouseY; targetSceneRotationY += dx * 0.005; targetSceneRotationX -= dy * 0.005; prevMouseX = mouseX; prevMouseY = mouseY; } }
+        function touchStarted(event) { if (event.target.tagName === 'CANVAS') { if (touches.length > 0) { isDragging = true; prevMouseX = touches[0].x; prevMouseY = touches[0].y; } return false; } }
+        function touchEnded(event) { isDragging = false; if (event.target.tagName === 'CANVAS') { return false; } }
+        function touchMoved(event) { if (isDragging && touches.length > 0) { let dx = touches[0].x - prevMouseX; let dy = touches[0].y - prevMouseY; targetSceneRotationY += dx * 0.005; targetSceneRotationX -= dy * 0.005; prevMouseX = touches[0].x; prevMouseY = touches[0].y; } if (event.target.tagName === 'CANVAS') { return false; } }
 
-        function mousePressed() {
-            isDragging = true;
-            prevMouseX = mouseX;
-            prevMouseY = mouseY;
-        }
-
-        function mouseReleased() {
-            isDragging = false;
-        }
-
-        function mouseDragged() {
-            if (isDragging) {
-                let dx = mouseX - prevMouseX;
-                let dy = mouseY - prevMouseY;
-                targetSceneRotationY += dx * 0.005;
-                targetSceneRotationX -= dy * 0.005;
-                prevMouseX = mouseX;
-                prevMouseY = mouseY;
-            }
-        }
-
-        function touchStarted(event) {
-            if (event.target.tagName === 'CANVAS') {
-                if (touches.length > 0) {
-                    isDragging = true;
-                    prevMouseX = touches[0].x;
-                    prevMouseY = touches[0].y;
+        function toggleAudio() {
+            if (systemState === 'dormant' || (systemState === 'active' && !audioActive)) {
+                audioActive = true;
+                systemState = 'transitioningOut';
+                transitionProgress = 0;
+                startButton.disabled = true;
+                for (const p of particles) {
+                    p.transitionStartPos = p.pos.copy();
+                    // MODIFICATION: Calculate a new random target position each time
+                    const newTargetRadius = map(pow(random(1), 2), 0, 1, 170, 300);
+                    const direction = p.pos.copy().normalize();
+                    if (direction.magSq() === 0) { // Handle case where particle is at center
+                        direction.set(p5.Vector.random3D());
+                    }
+                    p.targetPos = direction.mult(newTargetRadius);
                 }
-                return false;
+                if (getAudioContext().state === 'suspended') getAudioContext().resume();
+                if (!mic) {
+                    mic = new p5.AudioIn();
+                    fft = new p5.FFT(0.8, 128);
+                    fft.setInput(mic);
+                }
+                mic.start(null, (err) => {
+                    console.error("Mic error:", err);
+                    showMessageBox("Mic access denied.");
+                    systemState = 'dormant';
+                    audioActive = false;
+                    startButton.disabled = false;
+                });
+            } else if (systemState === 'active' && audioActive) {
+                audioActive = false;
+                systemState = 'transitioningIn';
+                transitionProgress = 0;
+                startButton.disabled = true;
+                mic.stop();
+                for (const p of particles) {
+                    p.transitionStartPos = p.pos.copy();
+                    p.returnTargetPos = p.pos.copy().normalize().mult(initialShellRadius);
+                }
             }
         }
 
-        function touchEnded(event) {
-            isDragging = false;
-            if (event.target.tagName === 'CANVAS') {
-                return false;
-            }
-        }
-
-        function touchMoved(event) {
-            if (isDragging && touches.length > 0) {
-                let dx = touches[0].x - prevMouseX;
-                let dy = touches[0].y - prevMouseY;
-                targetSceneRotationY += dx * 0.005;
-                targetSceneRotationX -= dy * 0.005;
-                prevMouseX = touches[0].x;
-                prevMouseY = touches[0].y;
-            }
-            if (event.target.tagName === 'CANVAS') {
-                return false;
-            }
-        }
-
-        function startAudio() {
-            if (awakeningState !== 'dormant') return;
-            
-            awakeningState = 'awakening'; // Start the transition
-            startButton.disabled = true;
-
-            if (getAudioContext().state === 'suspended') {
-                getAudioContext().resume();
-            }
-            mic = new p5.AudioIn();
-            fft = new p5.FFT(0.8, 128);
-            fft.setInput(mic);
-            mic.start(() => {
-                // Audio is ready, but we wait for the transition to finish
-            }, (err) => {
-                console.error("Microphone access error:", err);
-                showMessageBox("Microphone access denied or not available. Please allow microphone access to enable voice reactivity.");
-            });
-        }
-
-        // Easing function for a smooth transition
-        function easeInOutCubic(t) {
-            return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-        }
+        function easeInOutCubic(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
 
         function windowResized() {
             resizeCanvas(windowWidth, windowHeight);
@@ -567,10 +439,8 @@
             sceneRotationY = lerp(sceneRotationY, targetSceneRotationY, rotationLerpFactor);
             mainSceneBuffer.rotateX(sceneRotationX);
             mainSceneBuffer.rotateY(sceneRotationY);
-            let rotationSpeedFactor = 0.005;
-            let noiseIncrement = 0.005;
-            sceneRotationZ += map(noise(sceneNoiseOffsetZ), 0, 1, -rotationSpeedFactor, rotationSpeedFactor);
-            sceneNoiseOffsetZ += noiseIncrement;
+            sceneRotationZ += map(noise(sceneNoiseOffsetZ), 0, 1, -0.005, 0.005);
+            sceneNoiseOffsetZ += 0.005;
             mainSceneBuffer.rotateZ(sceneRotationZ);
 
             let blackSphereAlpha = map(cameraZ, minZoom, maxZoom, 0, 255, true);
@@ -579,77 +449,67 @@
             let zoomGradientFactor = map(cameraZ, gradientStartZoom, minZoom, 0, 1, true);
             let zoomStrokeMultiplier = map(cameraZ, maxZoom, minZoom, 1.0, 0.5, true);
             
-            if (awakeningState === 'awakening') {
+            if (systemState === 'transitioningOut') {
                 transitionProgress++;
-                if (transitionProgress >= sphereTransitionDuration) {
-                    awakeningState = 'active';
-                    audioStarted = true;
+                const lerpAmount = easeInOutCubic(transitionProgress / transitionDuration);
+                for (const p of particles) p.pos = p5.Vector.lerp(p.transitionStartPos, p.targetPos, lerpAmount);
+                currentCentralSphereSize = lerp(dormantCentralSphereSize, centralSphereSize, lerpAmount);
+                if (transitionProgress >= transitionDuration) {
+                    systemState = 'active';
+                    startButton.disabled = false;
                 }
-                
-                const blackSphereProgress = min(1, transitionProgress / blackSphereTransitionDuration);
-                currentCentralSphereSize = lerp(80, centralSphereSize, easeInOutCubic(blackSphereProgress));
+            } else if (systemState === 'transitioningIn') {
+                transitionProgress++;
+                const lerpAmount = easeInOutCubic(transitionProgress / transitionDuration);
+                for (const p of particles) p.pos = p5.Vector.lerp(p.transitionStartPos, p.returnTargetPos, lerpAmount);
+                currentCentralSphereSize = lerp(currentCentralSphereSize, dormantCentralSphereSize, lerpAmount);
+                if (transitionProgress >= transitionDuration) {
+                    systemState = 'active';
+                    startButton.disabled = false;
+                }
             }
 
-            if (audioStarted) {
-                if (mic && mic.enabled && getAudioContext().state === 'running') {
+            if (audioActive) {
+                if (mic && mic.enabled) {
                     currentVolume = mic.getLevel();
                     fft.analyze();
                     bassEnergy = fft.getEnergy('bass');
                 } else {
-                    currentVolume = 0.0;
+                    currentVolume = 0;
                     bassEnergy = 0;
                 }
                 audioHistory.push({ volume: currentVolume, bass: bassEnergy });
-                if (audioHistory.length > historyLength) {
-                    audioHistory.shift();
+                if (audioHistory.length > historyLength) audioHistory.shift();
+
+                if (systemState === 'active') {
+                    let effectiveVolumeCentral = (currentVolume > minActivationVolume) ? currentVolume : 0;
+                    let effectiveBassEnergyCentral = (bassEnergy > minActivationBass) ? bassEnergy : 0;
+                    let targetCentralSphereSize = 150 + map(effectiveVolumeCentral, minActivationVolume, 0.6, 0, 112.5, true) + map(effectiveBassEnergyCentral, minActivationBass, 200, 0, 45, true);
+                    currentCentralSphereSize = lerp(currentCentralSphereSize, targetCentralSphereSize, 0.08);
                 }
-
-                let effectiveVolumeCentral = (currentVolume > minActivationVolume) ? currentVolume : 0;
-                let effectiveBassEnergyCentral = (bassEnergy > minActivationBass) ? bassEnergy : 0;
-                let targetCentralSphereSize = 150;
-                targetCentralSphereSize += map(effectiveVolumeCentral, minActivationVolume, 0.6, 0, 112.5, true);
-                targetCentralSphereSize += map(effectiveBassEnergyCentral, minActivationBass, 200, 0, 45, true);
-
-                star.update();
-                star.applyAudioInfluence(currentVolume, bassEnergy);
-                star.display(mainSceneBuffer);
-
-                for (let particle of particles) {
-                    particle.update();
-                    particle.applyAudioInfluence(audioHistory);
-                    particle.display(mainSceneBuffer, zoomSizeMultiplier, zoomGradientFactor, zoomStrokeMultiplier);
-                }
-
-                mainSceneBuffer.push();
-                mainSceneBuffer.noStroke();
-                mainSceneBuffer.fill(0, blackSphereAlpha);
-                mainSceneBuffer.sphere(targetCentralSphereSize, centralSphereDetailX, centralSphereDetailY);
-                mainSceneBuffer.pop();
             } else {
-                while (audioHistory.length < historyLength) {
-                    audioHistory.push({ volume: 0.0, bass: 0 });
+                if (systemState === 'active') {
+                    currentCentralSphereSize = lerp(currentCentralSphereSize, dormantCentralSphereSize, 0.1);
                 }
-                while (audioHistory.length > historyLength) {
-                    audioHistory.shift();
-                }
-                
-                star.update();
-                star.applyAudioInfluence(0,0);
-                star.display(mainSceneBuffer);
-
-                for (let particle of particles) {
-                    particle.update();
-                    particle.applyAudioInfluence(audioHistory);
-                    particle.display(mainSceneBuffer, zoomSizeMultiplier, zoomGradientFactor, zoomStrokeMultiplier);
-                }
-                mainSceneBuffer.push();
-                mainSceneBuffer.noStroke();
-                mainSceneBuffer.fill(0, blackSphereAlpha);
-                mainSceneBuffer.sphere(currentCentralSphereSize, centralSphereDetailX, centralSphereDetailY);
-                mainSceneBuffer.pop();
             }
-            mainSceneBuffer.pop();
 
+            star.update();
+            star.applyAudioInfluence(currentVolume, bassEnergy);
+            star.display(mainSceneBuffer);
+
+            for (let particle of particles) {
+                if (systemState === 'active') particle.update();
+                particle.applyAudioInfluence(audioHistory);
+                particle.display(mainSceneBuffer, zoomSizeMultiplier, zoomGradientFactor, zoomStrokeMultiplier);
+            }
+
+            mainSceneBuffer.push();
+            mainSceneBuffer.noStroke();
+            mainSceneBuffer.fill(0, blackSphereAlpha);
+            mainSceneBuffer.sphere(currentCentralSphereSize, centralSphereDetailX, centralSphereDetailY);
+            mainSceneBuffer.pop();
+            
+            mainSceneBuffer.pop();
             background(0);
             image(mainSceneBuffer, -width / 2, -height / 2);
         }
