@@ -342,8 +342,7 @@
                 this.size = lerp(this.size, this.targetSize, lerpFactorSize);
             }
 
-            // MODIFICATION: The display method now accepts a zoom multiplier to scale elements.
-            display(graphicsBuffer, zoomMultiplier) {
+            display(graphicsBuffer, zoomMultiplier, zoomGradientFactor) {
                 if (this.flowDirection === 0) return;
 
                 for (let i = 0; i < this.positionHistory.length; i++) {
@@ -359,11 +358,37 @@
                     graphicsBuffer.pop();
                 }
 
+                // MODIFICATION: Connector line drawing logic updated for gradient effect.
                 graphicsBuffer.push();
-                graphicsBuffer.stroke(this.originalRGB[0], this.originalRGB[1], this.originalRGB[2], this.currentBrightnessFactor * 100);
                 graphicsBuffer.strokeWeight(map(this.currentBrightnessFactor, 0.5, 1.0, 0.5, 2.5));
-                graphicsBuffer.line(this.pos.x, this.pos.y, this.pos.z, 0, 0, 0);
+
+                const whiteColor = color(255);
+                const particleColor = color(this.originalRGB[0], this.originalRGB[1], this.originalRGB[2]);
+                const finalColor = lerpColor(particleColor, whiteColor, zoomGradientFactor);
+                const finalAlpha = this.currentBrightnessFactor * 100;
+
+                if (zoomGradientFactor > 0) {
+                    // Draw line in segments for gradient
+                    const segments = 10;
+                    for (let i = 0; i < segments; i++) {
+                        const startLerp = i / segments;
+                        const endLerp = (i + 1) / segments;
+                        const start = p5.Vector.lerp(createVector(0,0,0), this.pos, startLerp);
+                        const end = p5.Vector.lerp(createVector(0,0,0), this.pos, endLerp);
+                        
+                        const segmentColor = lerpColor(whiteColor, particleColor, endLerp);
+                        const finalSegmentColor = lerpColor(segmentColor, whiteColor, zoomGradientFactor * (1 - endLerp));
+                        
+                        graphicsBuffer.stroke(red(finalSegmentColor), green(finalSegmentColor), blue(finalSegmentColor), finalAlpha);
+                        graphicsBuffer.line(start.x, start.y, start.z, end.x, end.y, end.z);
+                    }
+                } else {
+                    // Draw solid line when zoomed out
+                    graphicsBuffer.stroke(red(finalColor), green(finalColor), blue(finalColor), finalAlpha);
+                    graphicsBuffer.line(0, 0, 0, this.pos.x, this.pos.y, this.pos.z);
+                }
                 graphicsBuffer.pop();
+
 
                 if (this.flowDirection !== 0) {
                     graphicsBuffer.push();
@@ -382,7 +407,6 @@
                         flowAlpha = constrain(this.currentBrightnessFactor * flowAlpha, 0, 255);
                         
                         let sizeMultiplier = map(this.currentBrightnessFactor, 0.5, 1.0, 0.5, 1.0, true);
-                        // Apply the new zoom multiplier here
                         let displaySize = flowEl.size * sizeMultiplier * zoomMultiplier;
 
                         graphicsBuffer.noStroke();
@@ -542,8 +566,9 @@
             mainSceneBuffer.rotateZ(sceneRotationZ);
 
             let blackSphereAlpha = map(cameraZ, minZoom, maxZoom, 0, 255, true);
-            // NEW: Calculate the zoom-based size multiplier for the flowing elements.
             let zoomSizeMultiplier = map(cameraZ, maxZoom, minZoom, 1.0, 0.5, true);
+            // NEW: Calculate how much to blend the line color to white based on zoom.
+            let zoomGradientFactor = map(cameraZ, maxZoom, minZoom, 0, 1, true);
             
             if (audioStarted) {
                 if (mic && mic.enabled && getAudioContext().state === 'running') {
@@ -572,8 +597,7 @@
                 for (let particle of particles) {
                     particle.update();
                     particle.applyAudioInfluence(audioHistory);
-                    // Pass the multiplier to the display function
-                    particle.display(mainSceneBuffer, zoomSizeMultiplier);
+                    particle.display(mainSceneBuffer, zoomSizeMultiplier, zoomGradientFactor);
                 }
 
                 mainSceneBuffer.push();
@@ -596,8 +620,7 @@
                 for (let particle of particles) {
                     particle.update();
                     particle.applyAudioInfluence(audioHistory);
-                    // Pass the multiplier to the display function
-                    particle.display(mainSceneBuffer, zoomSizeMultiplier);
+                    particle.display(mainSceneBuffer, zoomSizeMultiplier, zoomGradientFactor);
                 }
                 mainSceneBuffer.push();
                 mainSceneBuffer.noStroke();
